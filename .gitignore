@@ -69,6 +69,10 @@ coverage/
 
 # Optional index file
 index.html
+users.html
 
 # Optional fiels file
 file.Routes.js
+
+# test files
+test

@@ -28,7 +28,7 @@ const setupMiddleware = () => {
     }));
     
     app.use(cors({
-        origin: process.env.CLIENT_URL?.split(',') || '*',
+        origin: process.env.CLIENT_URL || '*',
         credentials: true,
         allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'X-Custom-Header'],
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']

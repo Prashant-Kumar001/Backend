@@ -18,8 +18,8 @@ const userSchema = new Schema({
     type: String,
     required: true,
     unique: true,
-    lowercase: true,
-    trim: true,
+    lowercase: true,  // Converts username to lowercase before saving
+    trim: true, // Automatically trims whitespace
     minlength: [3, 'Username must be at least 3 characters long']
   },
   email: {
@@ -73,6 +73,26 @@ const userSchema = new Schema({
     type: String,
     enum: ['user', 'admin'],
     default: 'user'
+  },
+  loginAttemptsLimit: {
+    type: Number,
+    default: 5, // Maximum login attempts before account lockout
+  },
+  loginCount: {
+    type: Number,
+    default: 0
+  },
+  isLoggedIn: {
+    type: Boolean,
+    default: false
+  },
+  lastLogout:{
+    type: Date,
+    default: null
+  },
+  lastLogoutIP:{
+    type: String,
+    default: null
   }
 }, { timestamps: true }); // Automatically adds `createdAt` and `updatedAt`
 

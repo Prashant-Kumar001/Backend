@@ -1,64 +1,112 @@
-import User from '../models/User_model.js'; // Adjust the path if needed
-import { validateUser } from '../validations/userValidation.js'; // Import validation function
-import { HTTP_STATUS } from '../../constants.js'; // Import constants
-import asyncHandler from '../utility/async_Handler.js'; // Import async handler
+import User from '../models/User_model.js';
+import { validateUser } from '../validations/userValidation.js';
+import { HTTP_STATUS } from '../../constants.js';
+import asyncHandler from '../utility/async_Handler.js';
 import cookieParser from 'cookie-parser';
+import { uploadFileToCloudinary, removeLocalFile } from '../utility/uploadUtils.js';
 
-
-// Controller to create a new user (sighup)
+// Controller to create a new user (signup)
 export const createUser = asyncHandler(async (req, res, next) => {
-    const { username, email, fullName, password, avatar, coverImage } = req.body;
-        console.log('user data', req.body)
-        console.log('user file', req.files)
+    const { username, email, fullName, password } = req.body;
+
+    const avatarLocalPath = req.files?.avatar?.[0].path;
+    const coverImageFile = req.files?.coverImage?.[0].path;
+
     // Validate user data
     const { error } = validateUser(req.body);
     if (error) {
-        console.log(error)
-        const validationErrors = error.details.map(err => err.message);
-        const errorMessage = validationErrors.join(', ');
-        const validationError = new Error(errorMessage);
-        validationError.statusCode = HTTP_STATUS.BAD_REQUEST;
-        return next(validationError);
+        const validationErrors = error.details.map(err => err.message).join(', ');
+        return next({
+            message: validationErrors,
+            statusCode: HTTP_STATUS.BAD_REQUEST,
+        });
     }
 
-    // Check if username or email already exists
-    const existingUser = await User.findOne({ username });
+
+    // if (error) {
+    //     console.log(error);
+    //     const validationErrors = error.details.map(err => err.message);
+    //     const errorMessage = validationErrors.join(', ');
+    //     const validationError = new Error(errorMessage);
+    //     validationError.statusCode = HTTP_STATUS.BAD_REQUEST;
+    //     return next(validationError);
+    //   }
+
+
+
+    // Check for existing username or email
+    const [existingUser, existingEmail] = await Promise.all([
+        User.findOne({ username }),
+        User.findOne({ email }),
+    ]);
     if (existingUser) {
-        const error = new Error(`Username "${username}" is already taken. Please choose another one.`);
-        error.statusCode = HTTP_STATUS.BAD_REQUEST; // 400
-        return next(error);
+        return next({
+            message: `Username "${username}" is already taken.`,
+            statusCode: HTTP_STATUS.BAD_REQUEST,
+        });
+    }
+    if (existingEmail) {
+        return next({
+            message: `Email "${email}" is already in use.`,
+            statusCode: HTTP_STATUS.BAD_REQUEST,
+        });
     }
 
-    const existingEmail = await User.findOne({ email });
-    if (existingEmail) {
-        const error = new Error(`Email "${email}" is already in use. Please use a different email.`);
-        error.statusCode = HTTP_STATUS.BAD_REQUEST; // 400
-        return next(error);
+    if (!avatarLocalPath) {
+        return next({
+            message: 'Please upload an avatar image.',
+            statusCode: HTTP_STATUS.BAD_REQUEST,
+        });
+      }
+
+    // Handle file uploads (if any)
+
+    let avatarUrl, coverImageUrl;
+    try {
+        if (avatarLocalPath) avatarUrl = (await uploadFileToCloudinary(avatarLocalPath)).secure_url;
+        if (coverImageFile) coverImageUrl = (await uploadFileToCloudinary(coverImageFile)).secure_url;
+    } catch (uploadError) {
+        return next({
+            message: 'File upload failed.',
+            statusCode: HTTP_STATUS.INTERNAL_SERVER_ERROR,
+        });
+    } finally {
+        // Remove local files after Cloudinary upload attempt
+        if (avatarLocalPath) removeLocalFile(avatarLocalPath);
+        if (coverImageFile) removeLocalFile(coverImageFile);
     }
+
+    if(!avatarUrl){
+        return next({
+            message: 'Failed to upload avatar.',
+            statusCode: HTTP_STATUS.INTERNAL_SERVER_ERROR,
+        });
+    }
+   
 
     // Create the user
     const newUser = new User({
         username,
         email,
-        password,
         fullName,
-        avatar,
-        coverImage,
-        resetToken: null, // Initially null
-        resetTokenExpiry: null, // Initially null
-        lastLogin: null, // Initially null
-        loginAttempts: 0, // Starts at 0
-        lastLoginIP: null, // Initially null
-        userAgent: null // Initially null
+        password,
+        avatar: avatarUrl,
+        coverImage: coverImageUrl ? coverImageUrl : 'no cover image',
     });
-
 
     const savedUser = await newUser.save();
 
-    // Generate refresh token and update the user
-    const refreshToken = newUser.generateRefreshToken();
-    savedUser.refreshToken = refreshToken;
-    await savedUser.save();
+    if(!savedUser){
+        return next({
+            message: 'Failed to create user.',
+            statusCode: HTTP_STATUS.INTERNAL_SERVER_ERROR,
+        });
+    }
+
+    // Generate refresh token and set it for the user
+    // const refreshToken = newUser.generateRefreshToken();
+    // savedUser.refreshToken = refreshToken;
+    // await savedUser.save();
 
     res.status(HTTP_STATUS.CREATED).json({
         success: true,
@@ -69,52 +117,45 @@ export const createUser = asyncHandler(async (req, res, next) => {
             fullName: savedUser.fullName,
             avatar: savedUser.avatar,
             coverImage: savedUser.coverImage,
-            refreshToken: refreshToken // Optionally return the refresh token
-        }
+            // refreshToken:
+        },
     });
 });
 
-//Controller to User Login
+// Controller for User Login
 export const loginUser = asyncHandler(async (req, res, next) => {
     const { username, password } = req.body;
 
-    // Find the user by username
     const user = await User.findOne({ username });
     if (!user) {
-        const error = new Error('Invalid username or password.');
-        error.statusCode = HTTP_STATUS.UNAUTHORIZED; // 401
-        return next(error);
+        return next({
+            message: 'Invalid username or password.',
+            statusCode: HTTP_STATUS.UNAUTHORIZED,
+        });
     }
 
-    // Check the password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
-        // Increment login attempts
         user.loginAttempts += 1;
         await user.save();
-        
-        const error = new Error('Invalid username or password.');
-        error.statusCode = HTTP_STATUS.UNAUTHORIZED; // 401
-        return next(error);
+
+        return next({
+            message: 'Invalid username or password.',
+            statusCode: HTTP_STATUS.UNAUTHORIZED,
+        });
     }
 
-    // Reset login attempts on successful login
+    user.refreshToken = user.generateRefreshToken();
     user.loginAttempts = 0;
-    user.lastLogin = new Date(); // Set the last login date
-    user.lastLoginIP = req.ip; // Store the last login IP
-    user.userAgent = req.headers['user-agent']; // Store user agent
-    await user.save(); // Save user updates
+    user.lastLogin = new Date();
+    user.lastLoginIP = req.ip;
+    user.userAgent = req.headers['user-agent'];
+    await user.save();
 
-    // Generate tokens
     const accessToken = user.generateAccessToken();
-    // const refreshToken = user.generateRefreshToken();
-    // user.refreshToken = refreshToken; // Update refresh token
-    // await user.save();
-    
-    // Set refresh token as a cookie
     res.cookie('accessToken', accessToken, {
-        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-        httpOnly: true
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        httpOnly: true,
     });
 
     res.status(HTTP_STATUS.OK).json({
@@ -127,54 +168,55 @@ export const loginUser = asyncHandler(async (req, res, next) => {
             fullName: user.fullName,
             avatar: user.avatar,
             coverImage: user.coverImage,
-        }
+        },
     });
 });
 
 // Controller to get a single user by ID
 export const getUserById = asyncHandler(async (req, res, next) => {
-    const { id } = req.params;
-
-    const user = await User.findById(id);
+    const user = await User.findById(req.params.id);
     if (!user) {
-        const error = new Error("User not found.");
-        error.statusCode = HTTP_STATUS.NOT_FOUND;
-        return next(error);
+        return next({
+            message: 'User not found.',
+            statusCode: HTTP_STATUS.NOT_FOUND,
+        });
     }
     res.status(HTTP_STATUS.OK).json(user);
 });
 
 // Controller to update a user by ID
 export const updateUserById = asyncHandler(async (req, res, next) => {
-    const { id } = req.params;
-    const { username, email, password } = req.body;
-    // Validate user data
+    const { username, email } = req.body;
+
     const { error } = validateUser(req.body);
     if (error) {
-        const validationError = new Error(error.details.map(err => err.message).join(', '));
-        validationError.statusCode = HTTP_STATUS.BAD_REQUEST;
-        return next(validationError);
+        return next({
+            message: error.details.map(err => err.message).join(', '),
+            statusCode: HTTP_STATUS.BAD_REQUEST,
+        });
     }
-    const updatedUser = await User.findByIdAndUpdate(id, { username, email, password }, { new: true });
+
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, { username, email }, { new: true });
     if (!updatedUser) {
-        const error = new Error("User not found.");
-        error.statusCode = HTTP_STATUS.NOT_FOUND;
-        return next(error);
+        return next({
+            message: 'User not found.',
+            statusCode: HTTP_STATUS.NOT_FOUND,
+        });
     }
     res.status(HTTP_STATUS.OK).json(updatedUser);
 });
 
 // Controller to delete a user by ID
 export const deleteUserById = asyncHandler(async (req, res, next) => {
-    const { id } = req.params;
-    const deletedUser = await User.findByIdAndDelete(id);
+    const deletedUser = await User.findByIdAndDelete(req.params.id);
     if (!deletedUser) {
-        const error = new Error("User not found.");
-        error.statusCode = HTTP_STATUS.NOT_FOUND;
-        return next(error);
+        return next({
+            message: 'User not found.',
+            statusCode: HTTP_STATUS.NOT_FOUND,
+        });
     }
     res.status(HTTP_STATUS.NO_CONTENT).json({
         success: true,
-        message: "User deleted successfully.",
-    }); // No content response
+        message: 'User deleted successfully.',
+    });
 });

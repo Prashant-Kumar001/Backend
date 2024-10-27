@@ -1,0 +1,73 @@
+# Node.js specific
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+
+# Dependency directories
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/
+
+# Debugging files
+*.swp
+*.swo
+*.pid
+*.seed
+
+# IDE files (specific to various editors)
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS-specific files
+.DS_Store            # macOS
+Thumbs.db            # Windows
+.npm/
+.vagrant/
+.vscode/
+
+# Coverage directory for tests
+coverage/
+
+# Uploads
+# uploads/
+
+# Miscellaneous
+*.log
+*.local
+*.lock
+*.cache
+*.pnp.js
+.pnp/
+.cache/
+
+# ESLint cache
+.eslintcache
+
+# Optional npm cache directory
+.npm/
+
+# Optional REPL history
+.node_repl_history
+
+# TSC (TypeScript) build artifacts
+*.tsbuildinfo
+
+# Optional index file
+index.html
+
+file.Routes.js

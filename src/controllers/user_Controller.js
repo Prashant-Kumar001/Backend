@@ -8,6 +8,17 @@ import {
   removeLocalFile,
 } from '../utility/uploadUtils.js';
 import { sendApiResponse } from '../utility/apiResponse_utility.js'; // Import sendApiResponse
+import sendApiError from '../utility/apiError.utility.js';
+import deleteImageFromCloudinary from '../utility/deleteImageFromCloudinary.js';
+
+const removeLocalFileFromServer = async (avatarLocalPath, coverImagePath) => {
+  if (avatarLocalPath) {
+    await removeLocalFile(avatarLocalPath);
+  }
+  if (coverImagePath) {
+    await removeLocalFile(coverImagePath);
+  }
+};
 
 // Controller to create a new user (signup)
 export const createUser = asyncHandler(async (req, res, next) => {
@@ -19,7 +30,7 @@ export const createUser = asyncHandler(async (req, res, next) => {
   const { error } = validateUser(req.body);
   if (error) {
     if (avatarLocalPath || coverImageFile) {
-      removeLocalFile(avatarLocalPath);
+      removeLocalFileFromServer(avatarLocalPath, coverImageFile);
     }
     return sendApiResponse(
       res,
@@ -38,7 +49,7 @@ export const createUser = asyncHandler(async (req, res, next) => {
   ]);
   if (existingUser) {
     if (avatarLocalPath || coverImageFile) {
-      removeLocalFile(avatarLocalPath);
+      removeLocalFileFromServer(avatarLocalPath, coverImageFile);
     }
     return sendApiResponse(
       res,
@@ -61,7 +72,7 @@ export const createUser = asyncHandler(async (req, res, next) => {
   }
   if (existingEmail) {
     if (avatarLocalPath || coverImageFile) {
-      removeLocalFile(avatarLocalPath);
+      removeLocalFileFromServer(avatarLocalPath, coverImageFile);
     }
     return sendApiResponse(
       res,
@@ -75,7 +86,7 @@ export const createUser = asyncHandler(async (req, res, next) => {
 
   if (!avatarLocalPath) {
     if (avatarLocalPath || coverImageFile) {
-      removeLocalFile(avatarLocalPath);
+      removeLocalFileFromServer(avatarLocalPath, coverImageFile);
     }
     return sendApiResponse(
       res,
@@ -272,45 +283,6 @@ export const getUserById = asyncHandler(async (req, res, next) => {
   sendApiResponse(res, HTTP_STATUS.OK, true, 'User found successfully', user);
 });
 
-// Controller to update a user by ID
-export const updateUserById = asyncHandler(async (req, res, next) => {
-  const { username, email } = req.body;
-
-  const { error } = validateUser(req.body);
-  if (error) {
-    return sendApiResponse(
-      res,
-      HTTP_STATUS.BAD_REQUEST,
-      false,
-      'Validation failed',
-      null,
-      error.details.map(err => err.message)
-    );
-  }
-
-  const updatedUser = await User.findByIdAndUpdate(
-    req.params.id,
-    { username, email },
-    { new: true }
-  );
-  if (!updatedUser) {
-    return sendApiResponse(
-      res,
-      HTTP_STATUS.NOT_FOUND,
-      false,
-      'User not found.'
-    );
-  }
-
-  sendApiResponse(
-    res,
-    HTTP_STATUS.OK,
-    true,
-    'User updated successfully',
-    updatedUser
-  );
-});
-
 // Controller to delete a user by ID
 export const deleteUserById = asyncHandler(async (req, res, next) => {
   const deletedUser = await User.findByIdAndDelete(req.params.id);
@@ -361,7 +333,7 @@ export const refreshAccessToken = asyncHandler(async (req, res) => {
         res,
         HTTP_STATUS.UNAUTHORIZED,
         false,
-        'Invalid or expired refresh token.'
+        'Invalid or expired refresh token or maybe user not logged in.'
       );
     }
 
@@ -407,12 +379,213 @@ export const refreshAccessToken = asyncHandler(async (req, res) => {
       }
     );
   } catch (error) {
-    console.error('Error refreshing access token:', error);
     return sendApiResponse(
       res,
       HTTP_STATUS.INTERNAL_SERVER_ERROR,
       false,
       'Failed to refresh access token.'
+    );
+  }
+});
+
+// change current users password
+export const changeCurrentUserPassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const user = await User.findById(req.user.userId);
+  if (!user) {
+    return sendApiResponse(
+      res,
+      HTTP_STATUS.UNAUTHORIZED,
+      false,
+      'User not found.'
+    );
+  }
+  const isMatch = await user.comparePassword(currentPassword);
+  if (!isMatch) {
+    return sendApiResponse(
+      res,
+      HTTP_STATUS.UNAUTHORIZED,
+      false,
+      'Current password is incorrect.'
+    );
+  }
+  user.password = newPassword;
+  await user.save({ validateBeforeSave: false });
+  sendApiResponse(res, HTTP_STATUS.OK, true, 'Password changed successfully');
+});
+
+// get current users information
+export const getCurrentUser = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    return sendApiResponse(
+      res,
+      HTTP_STATUS.UNAUTHORIZED,
+      false,
+      'User not found.'
+    );
+  }
+  sendApiResponse(res, HTTP_STATUS.OK, true, 'User fetched successfully', user);
+});
+
+// Controller to update a user by ID
+export const updateAccountDetails = asyncHandler(async (req, res, next) => {
+  const { fullName, email } = req.body;
+  const currentUserId = req.user.userId;
+
+  if (!fullName || !email) {
+    return sendApiError(
+      res,
+      HTTP_STATUS.BAD_REQUEST,
+      false,
+      'Missing fullName or email in request body'
+    );
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(
+    currentUserId,
+    { fullName, email },
+    { new: true }
+  ).select('username email fullName avatar coverImage ');
+
+  if (!updatedUser) {
+    return sendApiResponse(
+      res,
+      HTTP_STATUS.NOT_FOUND,
+      false,
+      'User not found.'
+    );
+  }
+
+  sendApiResponse(
+    res,
+    HTTP_STATUS.OK,
+    true,
+    'User updated successfully',
+    updatedUser
+  );
+});
+
+// controller for updating a user's avatar
+export const changeCurrentUserAvatar = asyncHandler(async (req, res) => {
+  // Check if the file exists
+  const file = req.file?.path;
+  if (!file) {
+    return sendApiError(res, HTTP_STATUS.BAD_REQUEST, 'No file uploaded');
+  }
+
+  try {
+    // Upload the file to Cloudinary
+    const newAvatar = await uploadFileToCloudinary(file);
+    const avatarUrl = newAvatar?.secure_url;
+    if (!avatarUrl) {
+      return sendApiError(
+        res,
+        HTTP_STATUS.BAD_REQUEST,
+        'Failed to upload avatar'
+      );
+    }
+    // Retrieve current user ID
+    const currentUserId = req.user?.userId;
+    if (!currentUserId) {
+      return sendApiError(res, HTTP_STATUS.BAD_REQUEST, 'User not found');
+    }
+
+    const UserId = req.user?.userId;
+    const currentUser = await User.findById(UserId);
+
+    // If there's an existing avatar URL, delete the old avatar
+    if (currentUser?.avatar) {
+      await deleteImageFromCloudinary(currentUser.avatar);
+    }
+
+    // Update user avatar
+    const updatedUser = await User.findByIdAndUpdate(
+      currentUserId,
+      { avatar: avatarUrl },
+      { new: true }
+    ).select('avatar');
+
+    if (!updatedUser) {
+      return sendApiError(res, HTTP_STATUS.NOT_FOUND, 'User not found');
+    }
+
+    // Send success response
+    return sendApiResponse(
+      res,
+      HTTP_STATUS.OK,
+      true,
+      'Avatar updated successfully'
+    );
+  } catch (error) {
+    // Catch any unexpected errors and clean up
+    return sendApiError(
+      res,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
+      'Failed to update avatar',
+      error.message
+    );
+  }
+});
+
+// Controller to update a user's coverImage
+export const changeCurrentUserCoverImage = asyncHandler(async (req, res) => {
+  // Check if the file exists
+  const file = req.file?.path;
+  if (!file) {
+    return sendApiError(res, HTTP_STATUS.BAD_REQUEST, 'No file uploaded');
+  }
+
+  try {
+    // Upload the file to Cloudinary
+    const newCoverImageUrl = await uploadFileToCloudinary(file);
+    const coverImageUrl = newCoverImageUrl?.secure_url;
+
+    if (!newCoverImageUrl) {
+      return sendApiError(
+        res,
+        HTTP_STATUS.BAD_REQUEST,
+        'Failed to upload coverImage'
+      );
+    }
+
+    // Retrieve current user ID
+    const currentUserId = req.user?.userId;
+    if (!currentUserId) {
+      return sendApiError(res, HTTP_STATUS.BAD_REQUEST, 'User not found');
+    }
+    const UserId = req.user?.userId;
+    const currentUser = await User.findById(UserId);
+
+    // If there's an existing avatar URL, delete the old avatar
+    if (currentUser?.coverImage) {
+      await deleteImageFromCloudinary(currentUser.coverImage);
+    }
+
+    // Update user avatar
+    const updatedUser = await User.findByIdAndUpdate(
+      currentUserId,
+      { coverImage: coverImageUrl },
+      { new: true }
+    ).select('avatar');
+
+    if (!updatedUser) {
+      return sendApiError(res, HTTP_STATUS.NOT_FOUND, 'User not found');
+    }
+    // Send success response
+    return sendApiResponse(
+      res,
+      HTTP_STATUS.OK,
+      true,
+      'coverImage updated successfully'
+    );
+  } catch (error) {
+    // Catch any unexpected errors and clean up
+    return sendApiError(
+      res,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
+      'Failed to update coverImage',
+      error.message
     );
   }
 });

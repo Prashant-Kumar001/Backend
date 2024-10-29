@@ -9,6 +9,7 @@ export const uploadFileToCloudinary = async (filePath) => {
             folder: 'uploaded_files', // Specify the folder to save the file
             public_id: Date.now().toString(), // Generate a unique public ID for the file
         });
+        removeLocalFile(filePath);
         return result; // Return the result from Cloudinary
     } catch (error) {
         removeLocalFile(filePath);
